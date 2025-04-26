@@ -159,8 +159,8 @@ What are all unique values of region in the wdi_country table?
 ## (skills: select, aggregate, order by)
 
 run_sql_and_return_html(cnx,"""
-SELECT region
-FROM wdi_country
+SELECT DISTINCT region
+FROM wdi_country WHERE region IS NOT NULL
 GROUP BY region
 ORDER BY region;
 """)
@@ -176,10 +176,10 @@ How many countries are in each region?
 ## (skills: select, aggregate, group by, order by)
 
 run_sql_and_return_html(cnx,"""
-SELECT `Region`, COUNT(*) AS `Country Count`
-FROM wdi_country
-GROUP BY `Region`
-ORDER BY `Country Count` DESC;
+SELECT region, COUNT(region) AS `Country Count`
+FROM wdi_country WHERE region IS NOT NULL
+GROUP BY region
+ORDER BY `Country Count`;
 """)
 
 ```
@@ -225,9 +225,9 @@ WHERE `Short Name` = 'Qatar';
 ## (skills: select, where, order by)
 
 run_sql_and_return_html(cnx,"""
-SELECT `Country Code`, `Short Name`, `country_abbr`, `country_wb_abbr`, `Region`
+SELECT `Country Code`, `Short Name`, `2-alpha code`, `WB-2 code`, `Region`
 FROM wdi_country
-WHERE `country_abbr` <> `country_wb_abbr`
+WHERE NOT `2-alpha code` = `WB-2 code`
 ORDER BY `Short Name`;
 """)
 
@@ -242,10 +242,10 @@ ORDER BY `Short Name`;
 ## (skills: select, aggregate, group by, order by)
 
 run_sql_and_return_html(cnx,"""
-SELECT `Income Group`, COUNT(*) AS `Country Count`
+SELECT `Income Group`, COUNT(*)
 FROM wdi_country
 GROUP BY `Income Group`
-ORDER BY `Country Count` DESC;
+ORDER BY COUNT(*) DESC, `Income Group`
 """)
 
 ```
@@ -260,9 +260,9 @@ ORDER BY `Country Count` DESC;
 ## in the first column.
 
 run_sql_and_return_html(cnx,"""
-SELECT `Short Name`, `Income Group`
+SELECT `Short Name`, region, `Income Group`
 FROM wdi_country
-ORDER BY `Income Group`, `Short Name`;
+WHERE `Income Group` is NULL;
 """)
 
 ```
