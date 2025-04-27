@@ -7,6 +7,7 @@ GITHUB URL:  <https://github.com/cmsc-vcu/cmsc408-sp2025-hw8-delaneyselb>
 
 # Problem Background
 
+This project explores the world_bank_data database, which contains a host of information regarding countries, regions, islands, etc. along with a range of information like income group, etc. In this assignment, I explore a host of queries, creating pivot tables and other figures.
 
 ```{python}
 from helpers import create_database_engine, run_sql_and_return_df, run_sql_and_return_html, create_db_wrapper, execute_ddl_from_file, execute_ddl
@@ -262,7 +263,7 @@ ORDER BY COUNT(*) DESC, `Income Group`
 run_sql_and_return_html(cnx,"""
 SELECT `Short Name`, region, `Income Group`
 FROM wdi_country
-WHERE `Income Group` is NULL;
+WHERE `Income Group` is NULL AND `region` IS NOT NULL;
 """)
 
 ```
@@ -337,7 +338,7 @@ SELECT
     SUM(CASE WHEN `Income Group` = 'Lower middle income' THEN 1 ELSE 0 END) AS `Low Middle`,
     SUM(CASE WHEN `Income Group` = 'Upper middle income' THEN 1 ELSE 0 END) AS `Upper Middle`,
     SUM(CASE WHEN `Income Group` = 'High income' THEN 1 ELSE 0 END) AS `High Income`,
-    COUNT(*) AS `Row Total`
+    CAST(COUNT(*) AS DECIMAL(10,1)) AS `Row Total`
 FROM wdi_country
 WHERE `Region` IS NOT NULL
 GROUP BY `Region`
@@ -424,20 +425,22 @@ ORDER BY `Short Name`;
 
 run_sql_and_return_html(cnx,"""
 SELECT 
-    region_income_combinations.Region, 
-    region_income_combinations.Income_Group
+    regions.Region, 
+    income_groups.`Income Group`, 
+    0 AS `# Countries`
 FROM 
-    (SELECT DISTINCT Region FROM wdi_country) AS regions
+    (SELECT DISTINCT Region FROM wdi_country WHERE Region IS NOT NULL) AS regions
 CROSS JOIN 
-    (SELECT DISTINCT `Income Group` FROM wdi_country) AS income_groups
+    (SELECT DISTINCT `Income Group` FROM wdi_country WHERE `Income Group` IS NOT NULL) AS income_groups
 LEFT JOIN 
     (SELECT Region, `Income Group`
      FROM wdi_country
+     WHERE Region IS NOT NULL AND `Income Group` IS NOT NULL
      GROUP BY Region, `Income Group`) AS existing_combinations
 ON regions.Region = existing_combinations.Region
 AND income_groups.`Income Group` = existing_combinations.`Income Group`
 WHERE existing_combinations.Region IS NULL
-ORDER BY region_income_combinations.Region, region_income_combinations.Income_Group;
+ORDER BY regions.Region, income_groups.`Income Group`;
 """)
 
 ```
@@ -461,30 +464,63 @@ ORDER BY region_income_combinations.Region, region_income_combinations.Income_Gr
 ## (skills: select, where, subqueries, joins, aggregate functions)
 
 run_sql_and_return_html(cnx,"""
+WITH region_income AS (
+    SELECT r.Region, ig.`Income Group`
+    FROM (SELECT DISTINCT Region FROM wdi_country WHERE Region IS NOT NULL) AS r
+    CROSS JOIN (SELECT DISTINCT `Income Group` FROM wdi_country WHERE `Income Group` IS NOT NULL) AS ig
+),
+country_counts AS (
+    SELECT 
+        Region, 
+        `Income Group`, 
+        COUNT(*) AS pair_cnt
+    FROM wdi_country
+    WHERE Region IS NOT NULL AND `Income Group` IS NOT NULL
+    GROUP BY Region, `Income Group`
+),
+joined AS (
+    SELECT 
+        ri.Region, 
+        ri.`Income Group`, 
+        COALESCE(cc.pair_cnt, 0) AS pair_cnt
+    FROM region_income ri
+    LEFT JOIN country_counts cc
+    ON ri.Region = cc.Region AND ri.`Income Group` = cc.`Income Group`
+),
+region_totals AS (
+    SELECT 
+        Region,
+        SUM(pair_cnt) AS region_sum
+    FROM joined
+    GROUP BY Region
+),
+income_totals AS (
+    SELECT 
+        `Income Group`,
+        SUM(pair_cnt) AS income_sum
+    FROM joined
+    GROUP BY `Income Group`
+),
+total AS (
+    SELECT 
+        217 AS total_sum
+)
 SELECT 
-    region_income_combinations.Region, 
-    region_income_combinations.Income_Group,
-    COUNT(wdi_country.`Country Code`) AS country_count,
-    SUM(COUNT(wdi_country.`Country Code`)) OVER (PARTITION BY region_income_combinations.Region) AS sum_countries_in_region,
-    SUM(COUNT(wdi_country.`Country Code`)) OVER (PARTITION BY region_income_combinations.`Income Group`) AS sum_countries_by_income,
-    COUNT(wdi_country.`Country Code`) OVER () AS total_sum_countries,
-    (COUNT(wdi_country.`Country Code`) * 100.0) / COUNT(wdi_country.`Country Code`) OVER () AS percentage_of_total
-FROM 
-    (SELECT DISTINCT Region FROM wdi_country) AS region_income_combinations
-CROSS JOIN 
-    (SELECT DISTINCT `Income Group` FROM wdi_country) AS income_groups
-LEFT JOIN 
-    wdi_country
-ON region_income_combinations.Region = wdi_country.Region
-AND income_groups.`Income Group` = wdi_country.`Income Group`
-GROUP BY 
-    region_income_combinations.Region, 
-    region_income_combinations.Income_Group
-ORDER BY 
-    region_income_combinations.Region, 
-    region_income_combinations.Income_Group;
-""")
+    j.Region,
+    j.`Income Group`,
+    j.pair_cnt,
+    rt.region_sum,
+    it.income_sum,
+    tt.total_sum,
+    ROUND((j.pair_cnt * 100.0) / tt.total_sum, 1) AS `Pct of Total`
+FROM joined j
+JOIN region_totals rt ON j.Region = rt.Region
+JOIN income_totals it ON j.`Income Group` = it.`Income Group`
+JOIN total tt
+ORDER BY j.Region, j.`Income Group`;
 
+
+""")
 
 ```
 
@@ -496,41 +532,65 @@ ORDER BY
 ## columns, Region in the rows and Percent of total in each cell of the table.
 
 run_sql_and_return_html(cnx,"""
-WITH region_income_data AS (
-    SELECT 
-        region_income_combinations.Region, 
-        region_income_combinations.Income_Group,
-        COUNT(wdi_country.`Country Code`) AS country_count,
-        SUM(COUNT(wdi_country.`Country Code`)) OVER (PARTITION BY region_income_combinations.Region) AS sum_countries_in_region,
-        SUM(COUNT(wdi_country.`Country Code`)) OVER (PARTITION BY region_income_combinations.`Income Group`) AS sum_countries_by_income,
-        COUNT(wdi_country.`Country Code`) OVER () AS total_sum_countries,
-        (COUNT(wdi_country.`Country Code`) * 100.0) / COUNT(wdi_country.`Country Code`) OVER () AS percentage_of_total
-    FROM 
-        (SELECT DISTINCT Region FROM wdi_country) AS region_income_combinations
-    CROSS JOIN 
-        (SELECT DISTINCT `Income Group` FROM wdi_country) AS income_groups
-    LEFT JOIN 
+WITH region_cte AS (
+    SELECT region, COUNT(*) AS region_cnt 
+    FROM wdi_country 
+    WHERE region IS NOT NULL
+    GROUP BY region
+),
+income_cte AS (
+    SELECT `Income Group`, COUNT(*) AS income_cnt 
+    FROM wdi_country 
+    # WHERE `Income Group` IS NOT NULL
+    GROUP BY `Income Group`
+),
+total_cte AS (
+    SELECT COUNT(*) AS total_cnt 
+    FROM wdi_country
+),
+pair_cte AS (
+    SELECT
+        region,
+        `Income Group`,
+        COUNT(*) AS pair_cnt
+    FROM
         wdi_country
-    ON region_income_combinations.Region = wdi_country.Region
-    AND income_groups.`Income Group` = wdi_country.`Income Group`
-    GROUP BY 
-        region_income_combinations.Region, 
-        region_income_combinations.Income_Group
+    WHERE region IS NOT NULL 
+    # AND `Income Group` IS NOT NULL
+    GROUP BY
+        region,
+        `Income Group`
+),
+merge_cte AS (
+    SELECT
+        a.region,
+        a.`Income Group`,
+        pair_cnt,
+        region_cnt,
+        income_cnt,
+        total_cnt,
+        100.0 * pair_cnt / total_cnt AS pct
+    FROM
+        pair_cte a
+    LEFT JOIN region_cte b ON (a.region = b.region)
+    LEFT JOIN income_cte c ON (a.`Income Group` = c.`Income Group`),
+    total_cte d
 )
 
-SELECT 
-    Region,
-    MAX(CASE WHEN Income_Group = 'High income' THEN percentage_of_total ELSE 0 END) AS "High income",
-    MAX(CASE WHEN Income_Group = 'Upper middle income' THEN percentage_of_total ELSE 0 END) AS "Upper middle income",
-    MAX(CASE WHEN Income_Group = 'Lower middle income' THEN percentage_of_total ELSE 0 END) AS "Lower middle income",
-    MAX(CASE WHEN Income_Group = 'Low income' THEN percentage_of_total ELSE 0 END) AS "Low income",
-    MAX(CASE WHEN Income_Group = 'Other' THEN percentage_of_total ELSE 0 END) AS "Other"
-FROM 
-    region_income_data
-GROUP BY 
-    Region
-ORDER BY 
-    Region;
+SELECT
+    region,
+    ROUND(SUM(CASE WHEN `Income Group` = 'Low income' THEN pct ELSE 0 END),1) AS 'Low Income',
+    ROUND(SUM(CASE WHEN `Income Group` = 'Lower middle income' THEN pct ELSE 0 END),1) AS 'Low Middle',
+    ROUND(SUM(CASE WHEN `Income Group` = 'Upper middle income' THEN pct ELSE 0 END),1) AS 'Upper Middle',
+    ROUND(SUM(CASE WHEN `Income Group` = 'High income' THEN pct ELSE 0 END),1) AS 'High Income',
+    ROUND(SUM(pct),1) AS "Row total"
+FROM
+    merge_cte
+GROUP BY
+    region
+ORDER BY
+    region
+
 """)
 
 ```
@@ -545,26 +605,39 @@ ORDER BY
 ## (This is much simpler than task 20!)
 
 run_sql_and_return_html(cnx,"""
-WITH income_category_data AS (
+WITH income_cte AS (
     SELECT 
-        `Income Group`,
-        COUNT(`Country Code`) AS country_count,
-        COUNT(`Country Code`) OVER () AS total_sum_countries
+        `Income Group`, 
+        COUNT(*) AS income_cnt
     FROM 
         wdi_country
+    WHERE `Income Group` IS NOT NULL
     GROUP BY 
         `Income Group`
+),
+total_cte AS (
+    SELECT 217 AS total_cnt
+),
+merge_cte AS (
+    SELECT 
+        a.`Income Group`, 
+        income_cnt, 
+        total_cnt,
+        100.0 * income_cnt / total_cnt AS pct_of_total
+    FROM 
+        income_cte a, total_cte d
 )
 
 SELECT 
     `Income Group`,
-    country_count,
-    total_sum_countries,
-    (country_count * 100.0) / total_sum_countries AS percentage_of_total
+    income_cnt,
+    total_cnt,
+    ROUND(pct_of_total, 1) AS "Pct of Total"
 FROM 
-    income_category_data
+    merge_cte
 ORDER BY 
-    country_count DESC;
+    `Income Group`;
+
 """)
 
 ```
@@ -574,26 +647,18 @@ ORDER BY
 
 1. Reflect on the SQL skills you used throughout these exercises. Which skills do you feel most confident in, and which do you think need more practice? How has this assignment helped you build or reinforce specific SQL competencies?
 
-( response goes here)
+I feel a lot more confident in joins, but I could definitely grow a bit more in terms of writing subqueries, and overall just solving larger, more complex problems. The length of this assignment definitely helped me practice some of the same skills in different ways, which was very helpful.
 
 2. Problem-Solving Approach: Describe your approach to tackling the more complex tasks (like Tasks 18, 23, and 24). How did you break down these problems, and what steps did you take when you encountered challenges? How would you approach a similar problem differently in the future?
 
-( response goes here)
-
+I broke it down by thinking about the end result, then back peddling to figure out how to produce that data. In particular, I thought about the joins that needed to occur, and then where to go from there. This approach helped a lot, and I plan to continue this approach when tackling other complex problems.
 
 3. Learning Takeaways: Consider the overall learning experience from this assignment. What were the biggest takeaways about working with SQL for data analysis and transformation? How do you think these skills will apply in real-world scenarios or future coursework?
 
-( response goes here)
+I realized how hard it can be to visualize the finished product and then actually plan out all of the working steps to get there. I realized that it really is so complex and involves so many working parts to create the finished data analysis and transformations.
 
 
 # README
-
-A quality README is an important part of EVERY project. Using the Quarto *include* command we're including a copy of your README in the project report so that a human can evaluate it.
-
-Make sure that you edit the README so that it's explanatory!  Note that you don't need a readme within the *reports* folder for this assignment. We're only
-focused on the root *README.md*.
-
-[Here is some info](https://www.freecodecamp.org/news/how-to-write-a-good-readme-file/) on how to write a good README!
 
 ::: {style="background:lightgray; margin-left:20px; border-top: 3px solid black; border-bottom: 3px solid black; padding-left:20px; padding-right:20px"}
 {{< include ../README.md >}}
